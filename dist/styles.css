@@ -75,4 +75,12 @@
   .collapsible-section summary.section-head{margin-bottom:22px}
   .progress-card{min-height:260px}
   .downloads-wrap{margin-top:28px}
+  .deliverables .tr,.downloads .tr,.payments .tr{grid-template-columns:minmax(0,1fr) auto auto!important;align-items:center}
+  .deliverables .tr>div,.downloads .tr>div,.payments .tr>div{padding:9px 10px;font-size:.78rem;white-space:nowrap}
+  .deliverables .tr>div:first-child,.downloads .tr>div:first-child,.payments .tr>div:first-child{grid-column:1/-1;padding:17px 10px 8px;white-space:normal}
+  .deliverables .tr>div:nth-child(2),.downloads .tr>div:nth-child(2),.payments .tr>div:nth-child(2){padding-left:10px;text-align:left}
+  .deliverables .tr>div:nth-child(3),.downloads .tr>div:nth-child(3),.payments .tr>div:nth-child(3){text-align:center}
+  .deliverables .tr>div:nth-child(4),.downloads .tr>div:nth-child(4),.payments .tr>div:nth-child(4){text-align:right;padding-right:10px}
+  .deliverables .pill,.payments .pill{padding:4px 8px;font-size:.62rem}
+  .download-link{font-size:.65rem}
 }
