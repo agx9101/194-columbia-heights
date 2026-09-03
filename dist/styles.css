@@ -6,13 +6,13 @@
 .hero-image img{object-fit:contain;filter:none}
 @media(max-width:520px){.hero-image{padding:14px}}
 .collapsible-section details{display:block}
-.collapsible-section summary.section-head{grid-template-columns:100px 1fr 28px;cursor:pointer;user-select:none;list-style:none;transition:background .18s ease;margin-bottom:42px}
+.collapsible-section summary.section-head{grid-template-columns:100px 1fr 28px;cursor:pointer;user-select:none;list-style:none;background:linear-gradient(90deg,#dfe1dc,#dfe1dc) no-repeat,#e8e9e5;background-size:0 100%,100% 100%;transition:background-size .32s ease;margin-bottom:42px}
 .collapsible-section summary.section-head::-webkit-details-marker{display:none}
-.collapsible-section summary.section-head:hover{background:#dfe1dc}
+.collapsible-section summary.section-head:hover{background-size:100% 100%,100% 100%}
 .collapsible-section summary.section-head:focus-visible{outline:2px solid var(--ink);outline-offset:3px}
-.collapsible-section summary i{justify-self:end;width:10px;height:10px;border-right:1.5px solid var(--ink);border-bottom:1.5px solid var(--ink);transform:rotate(45deg) translateY(-2px);transition:transform .18s ease}
+.collapsible-section summary h2{transition:transform .25s ease}.collapsible-section summary:hover h2{transform:translateX(7px)}.collapsible-section summary i{justify-self:end;width:10px;height:10px;border-right:1.5px solid var(--ink);border-bottom:1.5px solid var(--ink);transform:rotate(45deg) translateY(-2px);transition:transform .25s ease}.collapsible-section summary:hover i{transform:rotate(45deg) translate(2px,-4px)}
 .collapsible-section details:not([open]) summary.section-head{margin-bottom:0}
-.collapsible-section details:not([open]) summary i{transform:rotate(-45deg) translate(-2px,-2px)}
+.collapsible-section details:not([open]) summary i{transform:rotate(-45deg) translate(-2px,-2px)}.collapsible-section details:not([open]) summary:hover i{transform:rotate(-45deg) translate(1px,1px)}
 @media(max-width:900px){.collapsible-section summary.section-head{grid-template-columns:46px 1fr 24px;margin-bottom:28px}}
 .progress-wave{display:grid;grid-template-columns:minmax(180px,.45fr) 1fr;align-items:center;gap:34px;margin-top:18px;padding:22px 28px;background:#181a19;color:#f5f5f2;border-left:4px solid #8a8e89;overflow:hidden}
 .wave-label{display:flex;align-items:baseline;justify-content:space-between;gap:20px;font:400 .72rem "DM Mono",monospace;text-transform:uppercase;letter-spacing:.06em}
