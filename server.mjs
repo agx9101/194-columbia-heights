@@ -44,6 +44,16 @@ function value(prop) {
   return null;
 }
 
+function number(prop, fallback = 0) {
+  const raw = value(prop);
+  if (typeof raw === "number") return Number.isFinite(raw) ? raw : fallback;
+  if (typeof raw === "string") {
+    const parsed = Number(raw.replace(/[^0-9.-]/g, ""));
+    return Number.isFinite(parsed) ? parsed : fallback;
+  }
+  return fallback;
+}
+
 async function notion(path, options = {}) {
   const token = process.env.NOTION_API_TOKEN;
   if (!token) throw new Error("NOTION_API_TOKEN is not configured");
@@ -76,10 +86,13 @@ async function loadProject() {
   const p = project.properties || {};
   const scopes = scopesRaw.filter(visible).map(row => {
     const x = row.properties || {};
+    const fee = number(x.Fee);
+    const paidToDate = number(x["Paid To Date"]);
+    const storedBalance = number(x.Balance, Number.NaN);
     return {
       id: row.id, scope:value(x.Scope) || "", company:value(x.Company) || "",
-      milestone:value(x["Current Milestone"]) || "", fee:value(x.Fee) || 0,
-      paidToDate:value(x["Paid To Date"]) || 0, balance:value(x.Balance) ?? 0,
+      milestone:value(x["Current Milestone"]) || "", fee,
+      paidToDate, balance:Number.isFinite(storedBalance) ? storedBalance : fee - paidToDate,
       progress:Math.max(0,Math.min(100,Number(value(x["Progress %"]) || 0))),
       status:value(x.Status) || "", showFinancials:value(x["Show Financials"]) !== false
     };
@@ -92,8 +105,11 @@ async function loadProject() {
   }).filter(x=>x.current).sort((a,b)=>a.order-b.order);
   const payments = paymentsRaw.filter(visible).map(row => {
     const x=row.properties || {};
-    return { id:row.id, name:value(x.Payment)||"", type:value(x.Type)||"", amount:Number(value(x.Amount)||0),
+    return { id:row.id, name:value(x.Payment)||"", type:value(x.Type)||"", amount:number(x.Amount),
       status:value(x.Status)||"", scopeIds:value(x.Scope)||[] };
+  }).sort((a,b) => {
+    const paymentNumber = name => Number(name.match(/\bpayment\s*(\d+)/i)?.[1] ?? Number.MAX_SAFE_INTEGER);
+    return paymentNumber(a.name) - paymentNumber(b.name) || a.name.localeCompare(b.name, undefined, { numeric:true });
   });
   return {
     project: {
