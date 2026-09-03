@@ -169,7 +169,7 @@ async function getProject(force=false) {
   cache=await loadProject(); cacheTime=Date.now(); return cache;
 }
 
-function json(res,status,data){res.writeHead(status,{"Content-Type":"application/json; charset=utf-8","Cache-Control":"no-store"});res.end(JSON.stringify(data));}
+function json(res,status,data){res.writeHead(status,{"Content-Type":"application/json; charset=utf-8","Cache-Control":"no-store","X-Robots-Tag":"noindex, nofollow, noarchive, nosnippet, noimageindex"});res.end(JSON.stringify(data));}
 function validSignature(raw,signature){
   const secret=process.env.NOTION_WEBHOOK_VERIFICATION_TOKEN;
   if(!secret||!signature)return false;
@@ -184,7 +184,7 @@ async function serveStatic(req,res){
   const clean=normalize(decodeURIComponent(requested)).replace(/^(\.\.[/\\])+/,"");
   let file=join(ROOT,clean==="/"?"index.html":clean);
   if(!file.startsWith(ROOT)){res.writeHead(403);res.end("Forbidden");return;}
-  try{if((await stat(file)).isDirectory())file=join(file,"index.html");const data=await readFile(file);res.writeHead(200,{"Content-Type":mime[extname(file)]||"application/octet-stream","Cache-Control":extname(file)===".html"?"no-cache":"public, max-age=3600"});res.end(data);}catch{res.writeHead(404);res.end("Not found");}
+  try{if((await stat(file)).isDirectory())file=join(file,"index.html");const data=await readFile(file);res.writeHead(200,{"Content-Type":mime[extname(file)]||"application/octet-stream","Cache-Control":extname(file)===".html"?"no-cache":"public, max-age=3600","X-Robots-Tag":"noindex, nofollow, noarchive, nosnippet, noimageindex"});res.end(data);}catch{res.writeHead(404,{"X-Robots-Tag":"noindex, nofollow, noarchive, nosnippet, noimageindex"});res.end("Not found");}
 }
 
 createServer(async(req,res)=>{
