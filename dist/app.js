@@ -29,7 +29,9 @@ function render(data){
   $(".hero h1").innerHTML=esc(p.name).replace(" Columbia","<br>Columbia");
   $(".status-line strong").textContent=p.status;
   $(".status-line span:last-child").textContent=p.phase;
-  $(".overview article:nth-child(1) h2").textContent=p.status;
+  const projectStatus=$(".overview article:nth-child(1) h2");
+  projectStatus.classList.toggle("active-heading",/^active$/i.test(p.status));
+  projectStatus.innerHTML=/^active$/i.test(p.status)?`<span class="status-dot" aria-hidden="true"></span><span>${esc(p.status)}</span>`:esc(p.status);
   $(".overview article:nth-child(1) p:last-child").textContent=data.scopes[0]?.milestone||p.milestone;
   $(".overview article:nth-child(2) p:last-child").textContent=p.milestone;
   if(p.cintoo)$(".access a:nth-child(1)").href=p.cintoo;
