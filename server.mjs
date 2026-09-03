@@ -44,6 +44,47 @@ function value(prop) {
   return null;
 }
 
+function propertyFiles(properties = {}) {
+  return Object.entries(properties).flatMap(([property, prop]) => {
+    if (prop?.type !== "files") return [];
+    return (prop.files || []).map(file => ({
+      name: file.name || property,
+      url: file.file?.url || file.external?.url || null,
+      kind: property
+    })).filter(file => file.url);
+  });
+}
+
+async function blockFiles(blockId) {
+  const found = [];
+  let cursor = null;
+  do {
+    const suffix = cursor ? `?page_size=100&start_cursor=${encodeURIComponent(cursor)}` : "?page_size=100";
+    const data = await notion(`/blocks/${blockId}/children${suffix}`);
+    for (const block of data.results || []) {
+      const media = block[block.type];
+      if (["file", "pdf", "image", "video", "audio"].includes(block.type)) {
+        const caption = text(media?.caption ? { rich_text:media.caption } : null);
+        const url = media?.file?.url || media?.external?.url || null;
+        if (url) found.push({ name:caption || `${block.type[0].toUpperCase()}${block.type.slice(1)}`, url, kind:block.type });
+      }
+      if (block.has_children) found.push(...await blockFiles(block.id));
+    }
+    cursor = data.has_more ? data.next_cursor : null;
+  } while (cursor);
+  return found;
+}
+
+async function pageFiles(page, context, scopeIds = []) {
+  const attached = propertyFiles(page.properties || {});
+  try { attached.push(...await blockFiles(page.id)); }
+  catch (error) { console.warn(`Could not read media for ${page.id}: ${error.message}`); }
+  return attached.map((file, index) => ({
+    id:`${page.id}-${index}`, name:file.name || context, url:file.url,
+    type:file.kind || "File", context, scopeIds
+  }));
+}
+
 function number(prop, fallback = 0) {
   const raw = value(prop);
   if (typeof raw === "number") return Number.isFinite(raw) ? raw : fallback;
@@ -97,13 +138,15 @@ async function loadProject() {
       status:value(x.Status) || "", showFinancials:value(x["Show Financials"]) !== false
     };
   }).filter(scope => !/ffe/i.test(`${scope.scope} ${scope.company}`));
-  const deliverables = assetsRaw.filter(visible).map(row => {
+  const visibleAssets = assetsRaw.filter(visible);
+  const visiblePayments = paymentsRaw.filter(visible);
+  const deliverables = visibleAssets.map(row => {
     const x=row.properties || {};
     return { name:value(x.Asset)||"", category:value(x.Category)||"", discipline:value(x.Discipline)||"",
       issued:value(x["Issue Date"]), status:value(x.Status)||"", current:value(x.Current)!==false,
       order:Number(value(x["Sort Order"])||0), url:value(x["External URL"])||null };
   }).filter(x=>x.current).sort((a,b)=>a.order-b.order);
-  const payments = paymentsRaw.filter(visible).map(row => {
+  const payments = visiblePayments.map(row => {
     const x=row.properties || {};
     return { id:row.id, name:value(x.Payment)||"", type:value(x.Type)||"", amount:number(x.Amount),
       status:value(x.Status)||"", scopeIds:value(x.Scope)||[] };
@@ -111,6 +154,12 @@ async function loadProject() {
     const paymentNumber = name => Number(name.match(/\bpayment\s*(\d+)/i)?.[1] ?? Number.MAX_SAFE_INTEGER);
     return paymentNumber(a.name) - paymentNumber(b.name) || a.name.localeCompare(b.name, undefined, { numeric:true });
   });
+  const downloads = (await Promise.all([
+    pageFiles(project, value(p.Project) || "Project"),
+    ...scopesRaw.filter(visible).map(row => pageFiles(row, value(row.properties?.Scope) || "Scope", [row.id])),
+    ...visibleAssets.map(row => pageFiles(row, value(row.properties?.Asset) || "Deliverable", value(row.properties?.Scope) || [])),
+    ...visiblePayments.map(row => pageFiles(row, value(row.properties?.Payment) || "Payment", value(row.properties?.Scope) || []))
+  ])).flat();
   return {
     project: {
       name:value(p.Project)||"194 Columbia Heights", address:value(p.Address)||"", status:value(p.Status)||"",
@@ -119,7 +168,7 @@ async function loadProject() {
       cintoo:value(p.Cintoo)||null, acc:value(p.ACC)||null, lead:(value(p["Project Lead"])||[])[0]||null,
       showFinancials:value(p["Show Financials"])!==false, showSchedule:value(p["Show Schedule"])===true,
       showFFE:value(p["Show FFE"])===true
-    }, scopes, deliverables, payments, syncedAt:new Date().toISOString()
+    }, scopes, deliverables, payments, downloads, syncedAt:new Date().toISOString()
   };
 }
 
