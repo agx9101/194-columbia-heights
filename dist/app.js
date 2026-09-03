@@ -27,6 +27,13 @@ function render(data){
   const rows=data.deliverables.map(d=>`<div class="tr" role="row"><div><strong>${esc(d.name)}</strong><small>${esc(d.category)}</small></div><div>${esc(d.discipline)}</div><div>${date(d.issued)}</div><div>${pill(d.status,"neutral")}</div></div>`).join("");
   $(".deliverables").innerHTML='<div class="tr th" role="row"><div>Deliverable</div><div>Discipline</div><div>Issued</div><div>Status</div></div>'+rows;
 
+  const downloadsWrap=$(".downloads-wrap");
+  const downloads=data.downloads||[];
+  downloadsWrap.hidden=!downloads.length;
+  if(downloads.length){
+    $(".downloads").innerHTML='<div class="tr th" role="row"><div>File</div><div>Attached to</div><div>Type</div><div>Download</div></div>'+downloads.map(file=>`<div class="tr" role="row"><div><strong>${esc(file.name)}</strong></div><div>${esc(file.context)}</div><div>${esc(file.type)}</div><div><a class="download-link" href="${esc(file.url)}" target="_blank" rel="noopener">Download ↗</a></div></div>`).join("");
+  }
+
   const financial=data.scopes.filter(s=>s.showFinancials);
   $(".collapsible-section .collapse-content").innerHTML=financial.map(s=>`<div class="scope-block ${scopeClass(s.company)}"><div class="scope-title"><div><span>${initials(s.company)}</span><p>${esc(s.company)}</p></div>${pill(s.status)}</div><div class="scope-grid"><div><small>Scope</small><strong>${esc(s.scope)}</strong></div><div><small>Contract fee</small><strong>${money(s.fee)}</strong></div><div><small>Paid to date</small><strong class="paid-money">${money(s.paidToDate)}</strong></div><div><small>Balance</small><strong>${money(s.balance)}</strong></div></div></div>`).join("");
 
