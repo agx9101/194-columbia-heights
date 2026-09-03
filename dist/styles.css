@@ -86,3 +86,4 @@
   .deliverables .pill,.payments .pill{padding:4px 8px;font-size:.62rem}
   .download-link{font-size:.65rem}
 }
+.slash-ribbon{position:absolute;left:0;top:0;bottom:0;display:flex;align-items:center;width:max-content;color:currentColor;font:500 19px/1 "DM Mono",monospace;letter-spacing:2px;white-space:nowrap;animation:slashFilm 5s linear infinite;will-change:transform}.slash-ribbon span{display:block;flex:none}.wave-fill{background:color-mix(in srgb,currentColor 4%,var(--white))}@keyframes slashFilm{to{transform:translateX(-50%)}}@media(prefers-reduced-motion:reduce){.slash-ribbon{animation:none}}
