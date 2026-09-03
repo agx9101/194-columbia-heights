@@ -55,30 +55,8 @@ function propertyFiles(properties = {}) {
   });
 }
 
-async function blockFiles(blockId) {
-  const found = [];
-  let cursor = null;
-  do {
-    const suffix = cursor ? `?page_size=100&start_cursor=${encodeURIComponent(cursor)}` : "?page_size=100";
-    const data = await notion(`/blocks/${blockId}/children${suffix}`);
-    for (const block of data.results || []) {
-      const media = block[block.type];
-      if (["file", "pdf", "image", "video", "audio"].includes(block.type)) {
-        const caption = text(media?.caption ? { rich_text:media.caption } : null);
-        const url = media?.file?.url || media?.external?.url || null;
-        if (url) found.push({ name:caption || `${block.type[0].toUpperCase()}${block.type.slice(1)}`, url, kind:block.type });
-      }
-      if (block.has_children) found.push(...await blockFiles(block.id));
-    }
-    cursor = data.has_more ? data.next_cursor : null;
-  } while (cursor);
-  return found;
-}
-
-async function pageFiles(page, context, scopeIds = []) {
+function pageFiles(page, context, scopeIds = []) {
   const attached = propertyFiles(page.properties || {});
-  try { attached.push(...await blockFiles(page.id)); }
-  catch (error) { console.warn(`Could not read media for ${page.id}: ${error.message}`); }
   return attached.map((file, index) => ({
     id:`${page.id}-${index}`, name:file.name || context, url:file.url,
     type:file.kind || "File", context, scopeIds
@@ -154,12 +132,11 @@ async function loadProject() {
     const paymentNumber = name => Number(name.match(/\bpayment\s*(\d+)/i)?.[1] ?? Number.MAX_SAFE_INTEGER);
     return paymentNumber(a.name) - paymentNumber(b.name) || a.name.localeCompare(b.name, undefined, { numeric:true });
   });
-  const downloads = (await Promise.all([
-    pageFiles(project, value(p.Project) || "Project"),
+  const downloads = ([
     ...scopesRaw.filter(visible).map(row => pageFiles(row, value(row.properties?.Scope) || "Scope", [row.id])),
     ...visibleAssets.map(row => pageFiles(row, value(row.properties?.Asset) || "Deliverable", value(row.properties?.Scope) || [])),
     ...visiblePayments.map(row => pageFiles(row, value(row.properties?.Payment) || "Payment", value(row.properties?.Scope) || []))
-  ])).flat();
+  ]).flat();
   return {
     project: {
       name:value(p.Project)||"194 Columbia Heights", address:value(p.Address)||"", status:value(p.Status)||"",
