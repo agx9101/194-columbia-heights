@@ -9,6 +9,20 @@ const initials = company => company.split(/\s+/).map(x=>x[0]).join("").slice(0,2
 function wave(){const slashes="////////////////////////////////////////////////////////////////";return `<div class="slash-ribbon"><span>${slashes}</span><span aria-hidden="true">${slashes}</span></div>`;}
 function pill(status,extra=""){return `<span class="pill ${extra}">${esc(status)}</span>`;}
 
+function dayKey(value){return new Date(`${value}T12:00:00`);}
+function renderGantt(items=[]){
+  const wrap=$(".milestone-gantt");
+  wrap.hidden=!items.length;
+  if(!items.length)return;
+  const starts=items.map(x=>dayKey(x.start).getTime()),ends=items.map(x=>dayKey(x.end||x.start).getTime());
+  const first=new Date(Math.min(...starts)),last=new Date(Math.max(...ends));
+  const dayMs=86400000,days=Math.max(1,Math.round((last-first)/dayMs)+1);
+  const offset=value=>Math.round((dayKey(value)-first)/dayMs)+1;
+  const labels=Array.from({length:days},(_,i)=>{const d=new Date(first.getTime()+i*dayMs);return `<span><b>${d.toLocaleDateString("en-US",{weekday:"short"})}</b>${d.toLocaleDateString("en-US",{month:"short",day:"numeric"})}</span>`;}).join("");
+  const rows=items.map(item=>{const start=offset(item.start),span=Math.max(1,offset(item.end||item.start)-start+1);return `<div class="gantt-row"><div class="gantt-label"><strong>${esc(item.name)}</strong><span>${esc(item.party)} · ${esc(item.status)}</span></div><div class="gantt-track" style="--days:${days}"><i class="gantt-bar" style="--start:${start};--span:${span}" title="${esc(item.name)} — ${date(item.start)}"></i></div></div>`;}).join("");
+  $(".gantt-chart").innerHTML=`<div class="gantt-dates"><span></span><div style="--days:${days}">${labels}</div></div>${rows}`;
+}
+
 function render(data){
   const p=data.project;
   $(".mast-meta span:last-child").textContent=`Last updated ${timestamp(p.lastEditedAt)}`;
@@ -23,6 +37,7 @@ function render(data){
   if(p.lead){$(".lead-person").lastChild.textContent=p.lead.name||"";const img=$(".lead-person img");if(p.lead.avatar)img.src=p.lead.avatar;}
 
   $(".progress-grid").innerHTML=data.scopes.map(s=>`<article class="progress-card ${scopeClass(s.company)}"><div class="company">${esc(s.company)}</div><h3>${esc(s.scope)}</h3><p>${esc(s.milestone)}</p>${pill(s.status)}<div class="scope-progress" style="--progress:${s.progress}%" aria-label="${s.progress} percent complete"><div class="scope-progress-meta"><span>Progress</span><strong>${s.progress}%</strong></div><div class="wave-track"><div class="wave-fill" aria-hidden="true">${wave()}</div></div></div></article>`).join("");
+  renderGantt(data.milestones||[]);
 
   const rows=data.deliverables.map(d=>`<div class="tr" role="row"><div><strong>${esc(d.name)}</strong><small>${esc(d.category)}</small></div><div>${esc(d.discipline)}</div><div>${date(d.issued)}</div><div>${pill(d.status,"neutral")}</div></div>`).join("");
   $(".deliverables").innerHTML='<div class="tr th" role="row"><div>Deliverable</div><div>Discipline</div><div>Issued</div><div>Status</div></div>'+rows;
