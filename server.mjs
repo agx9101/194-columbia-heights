@@ -115,6 +115,7 @@ async function loadProject() {
     project: {
       name:value(p.Project)||"194 Columbia Heights", address:value(p.Address)||"", status:value(p.Status)||"",
       phase:value(p.Phase)||"", milestone:value(p["Current Milestone"])||"", lastUpdated:value(p["Last Client Update"]),
+      lastEditedAt:project.last_edited_time || null,
       cintoo:value(p.Cintoo)||null, acc:value(p.ACC)||null, lead:(value(p["Project Lead"])||[])[0]||null,
       showFinancials:value(p["Show Financials"])!==false, showSchedule:value(p["Show Schedule"])===true,
       showFFE:value(p["Show FFE"])===true
