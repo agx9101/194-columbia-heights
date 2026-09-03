@@ -8,7 +8,7 @@ const ROOT = join(process.cwd(), "dist");
 const PROJECT_ID = process.env.NOTION_PROJECT_PAGE_ID || "3cf19be7-b9d8-8188-82ff-f9e925ae0352";
 const NOTION_VERSION = "2025-09-03";
 const SOURCES = {
-  progress: "43fb016c-d5ed-48cb-a652-8a794c2bef28",
+  milestones: "7eef80b4-6b63-4f09-a91a-dc8ef2f51413",
   deliverables: "16d61f21-c120-4d12-b922-c108660d638f",
   scopes: "323e95e4-b890-4222-976e-f61c6b8199e2",
   payments: "017eab8a-7b7d-476c-8d6a-6554cb35ab06"
@@ -95,12 +95,18 @@ async function querySource(id) {
   return data.results || [];
 }
 
+async function queryMilestones() {
+  const body = { page_size: 100, filter: { property: "Client Visible", checkbox: { equals: true } } };
+  const data = await notion(`/data_sources/${SOURCES.milestones}/query`, { method:"POST", body:JSON.stringify(body) });
+  return data.results || [];
+}
+
 function visible(page) { return value(page.properties?.["Client Visible"]) !== false; }
 
 async function loadProject() {
-  const [project, scopesRaw, assetsRaw, paymentsRaw] = await Promise.all([
+  const [project, scopesRaw, assetsRaw, paymentsRaw, milestonesRaw] = await Promise.all([
     notion(`/pages/${PROJECT_ID}`), querySource(SOURCES.scopes),
-    querySource(SOURCES.deliverables), querySource(SOURCES.payments)
+    querySource(SOURCES.deliverables), querySource(SOURCES.payments), queryMilestones()
   ]);
   const p = project.properties || {};
   const scopes = scopesRaw.filter(visible).map(row => {
@@ -137,6 +143,15 @@ async function loadProject() {
     ...visibleAssets.map(row => pageFiles(row, value(row.properties?.Asset) || "Deliverable", value(row.properties?.Scope) || [])),
     ...visiblePayments.map(row => pageFiles(row, value(row.properties?.Payment) || "Payment", value(row.properties?.Scope) || []))
   ]).flat();
+  const milestones = milestonesRaw.map(row => {
+    const x = row.properties || {};
+    return {
+      id:row.id, name:value(x.Milestone)||"", notes:value(x.Notes)||"",
+      party:value(x["Responsible Party"])||"", status:value(x.Status)||"",
+      sequence:number(x.Sequence, 999), start:x["Target Date"]?.date?.start||null,
+      end:x["Target Date"]?.date?.end||x["Target Date"]?.date?.start||null
+    };
+  }).filter(item => item.name && item.start).sort((a,b) => a.sequence-b.sequence || a.start.localeCompare(b.start));
   return {
     project: {
       name:value(p.Project)||"194 Columbia Heights", address:value(p.Address)||"", status:value(p.Status)||"",
@@ -145,7 +160,7 @@ async function loadProject() {
       cintoo:value(p.Cintoo)||null, acc:value(p.ACC)||null, lead:(value(p["Project Lead"])||[])[0]||null,
       showFinancials:value(p["Show Financials"])!==false, showSchedule:value(p["Show Schedule"])===true,
       showFFE:value(p["Show FFE"])===true
-    }, scopes, deliverables, payments, downloads, syncedAt:new Date().toISOString()
+    }, scopes, milestones, deliverables, payments, downloads, syncedAt:new Date().toISOString()
   };
 }
 
