@@ -1,6 +1,7 @@
 const $ = selector => document.querySelector(selector);
 const money = value => new Intl.NumberFormat("en-US",{style:"currency",currency:"USD"}).format(Number(value||0));
 const date = value => value ? new Intl.DateTimeFormat("en-US",{month:"short",day:"2-digit",year:"numeric"}).format(new Date(`${value}T12:00:00`)) : "—";
+const timestamp = value => value ? new Intl.DateTimeFormat("en-US",{timeZone:"America/New_York",month:"short",day:"2-digit",year:"numeric",hour:"numeric",minute:"2-digit",timeZoneName:"short"}).format(new Date(value)) : "—";
 const esc = value => String(value??"").replace(/[&<>'"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[c]));
 const scopeClass = company => /animate/i.test(company)?"animate":/potential/i.test(company)?"potential":"";
 const initials = company => company.split(/\s+/).map(x=>x[0]).join("").slice(0,2).toUpperCase();
@@ -10,7 +11,7 @@ function pill(status,extra=""){return `<span class="pill ${extra}">${esc(status)
 
 function render(data){
   const p=data.project;
-  $(".mast-meta span:last-child").textContent=`Last updated ${date(p.lastUpdated)}`;
+  $(".mast-meta span:last-child").textContent=`Last updated ${timestamp(p.lastEditedAt)}`;
   $(".hero h1").innerHTML=esc(p.name).replace(" Columbia","<br>Columbia");
   $(".status-line strong").textContent=p.status;
   $(".status-line span:last-child").textContent=p.phase;
