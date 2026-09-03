@@ -31,7 +31,7 @@ function render(data){
   const downloads=data.downloads||[];
   downloadsWrap.hidden=!downloads.length;
   if(downloads.length){
-    $(".downloads").innerHTML='<div class="tr th" role="row"><div>File</div><div>Attached to</div><div>Type</div><div>Download</div></div>'+downloads.map(file=>`<div class="tr" role="row"><div><strong>${esc(file.name)}</strong></div><div>${esc(file.context)}</div><div>${esc(file.type)}</div><div><a class="download-link" href="${esc(file.url)}" target="_blank" rel="noopener">Download ↗</a></div></div>`).join("");
+    $(".downloads").innerHTML='<div class="tr th" role="row"><div>File</div><div>Attached to</div><div>Type</div><div>Download</div></div>'+downloads.map(file=>`<a class="tr download-row" role="row" href="${esc(file.url)}" target="_blank" rel="noopener" aria-label="Download ${esc(file.name)}"><div><strong>${esc(file.name)}</strong></div><div>${esc(file.context)}</div><div>${esc(file.type)}</div><div><span class="download-link">Download ↗</span></div></a>`).join("");
   }
 
   const financial=data.scopes.filter(s=>s.showFinancials);
