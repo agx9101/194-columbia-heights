@@ -53,3 +53,26 @@
 @media(max-width:520px){.project-lead{align-items:flex-start;gap:12px}.lead-person{flex-shrink:0}}
 .downloads-wrap{margin-top:42px}.downloads-wrap[hidden]{display:none}.downloads .tr{grid-template-columns:minmax(300px,1.6fr) minmax(220px,1fr) minmax(100px,.5fr) minmax(110px,.5fr)}.download-link{display:inline-flex;color:var(--ink);font:500 .72rem "DM Mono",monospace;text-transform:uppercase;text-decoration:none;border-bottom:1px solid var(--ink);padding-bottom:2px}.download-link:hover{color:var(--green);border-color:var(--green)}
 @media(max-width:900px){.downloads .tr{grid-template-columns:1fr 1fr}.downloads .tr>div:first-child{grid-column:1/-1}}
+
+/* Compact mobile project sheet */
+@media(max-width:520px){
+  .masthead{height:auto;min-height:70px;padding:14px 0;align-items:flex-start;gap:12px}
+  .wordmark{flex:0 1 82px;line-height:1.35;overflow-wrap:anywhere}
+  .mast-meta{flex:1 1 190px;display:flex;flex-wrap:wrap;justify-content:flex-end;gap:3px 14px;line-height:1.45;text-align:right}
+  .mast-meta span,.mast-meta span:first-child{display:inline;white-space:normal}
+  .hero-copy{min-height:0;padding:28px 0 22px}
+  .hero h1{font-size:clamp(2.35rem,11vw,3rem);line-height:.98;margin:34px 0 30px;letter-spacing:-.065em}
+  .project-lead{margin-bottom:18px;padding:10px 0;align-items:center}
+  .status-line{margin-top:0}
+  .hero-image{height:auto;min-height:0;padding:22px 10px 14px;display:flex;flex-direction:column;align-items:center;justify-content:center}
+  .hero-image img{width:100%;height:auto;max-height:390px;object-fit:contain;object-position:center}
+  .hero-image figcaption{position:static;align-self:center;margin-top:10px;background:transparent;padding:0;text-align:center}
+  .overview>article,.overview>article+article{padding:26px 0}
+  .overview h2{margin:16px 0 6px}
+  .access a{padding-top:17px;padding-bottom:17px}
+  .project-section{padding:46px 0}
+  .section-head{margin-bottom:22px;padding-top:11px;padding-bottom:11px}
+  .collapsible-section summary.section-head{margin-bottom:22px}
+  .progress-card{min-height:260px}
+  .downloads-wrap{margin-top:28px}
+}
