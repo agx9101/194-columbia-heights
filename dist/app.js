@@ -6,7 +6,7 @@ const esc = value => String(value??"").replace(/[&<>'"]/g,c=>({"&":"&amp;","<":"
 const scopeClass = company => /animate/i.test(company)?"animate":/potential/i.test(company)?"potential":"";
 const initials = company => company.split(/\s+/).map(x=>x[0]).join("").slice(0,2).toUpperCase();
 
-function wave(){return '<div class="wave-ribbon"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>';}
+function wave(){const slashes="////////////////////////////////////////////////////////////////";return `<div class="slash-ribbon"><span>${slashes}</span><span aria-hidden="true">${slashes}</span></div>`;}
 function pill(status,extra=""){return `<span class="pill ${extra}">${esc(status)}</span>`;}
 
 function render(data){
