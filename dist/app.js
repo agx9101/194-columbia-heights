@@ -60,4 +60,17 @@ function render(data){
 }
 
 async function sync(){try{const response=await fetch("/api/project",{cache:"no-store"});if(response.ok)render(await response.json());}catch{}}
-sync();setInterval(sync,10000);
+const gate=$(".access-gate");
+if(gate){
+  gate.querySelector("form").addEventListener("submit",async event=>{
+    event.preventDefault();
+    const form=event.currentTarget,button=form.querySelector("button"),message=form.querySelector(".gate-message");
+    button.disabled=true;message.textContent="Checking…";
+    try{
+      const response=await fetch("/api/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({password:new FormData(form).get("password")})});
+      if(response.ok){location.reload();return;}
+      message.textContent=response.status===429?"Too many attempts. Try again shortly.":"Incorrect password.";
+    }catch{message.textContent="Unable to connect. Try again.";}
+    button.disabled=false;form.password.focus();
+  });
+}else{sync();setInterval(sync,10000);}
