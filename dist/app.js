@@ -49,7 +49,7 @@ function render(data){
   const downloads=data.downloads||[];
   downloadsWrap.hidden=!downloads.length;
   if(downloads.length){
-    $(".downloads").innerHTML='<div class="tr th" role="row"><div>File</div><div>Attached to</div><div>Type</div><div>Download</div></div>'+downloads.map(file=>`<a class="tr download-row" role="row" href="${esc(file.url)}" target="_blank" rel="noopener" aria-label="Download ${esc(file.name)}"><div><strong>${esc(file.name)}</strong></div><div>${esc(file.context)}</div><div>${esc(file.type)}</div><div><span class="download-link">Download ↗</span></div></a>`).join("");
+    $(".downloads").innerHTML='<div class="tr th" role="row"><div>File</div><div>Attached to</div><div>Type</div><div>Download</div></div>'+downloads.map(file=>data.locked?`<button type="button" class="tr download-row locked-download" role="row" data-unlock aria-label="Unlock ${esc(file.name)}"><div><strong>${esc(file.name)}</strong></div><div>${esc(file.context)}</div><div>${esc(file.type)}</div><div><span class="download-link">Protected ↗</span></div></button>`:`<a class="tr download-row" role="row" href="${esc(file.url)}" target="_blank" rel="noopener" aria-label="Download ${esc(file.name)}"><div><strong>${esc(file.name)}</strong></div><div>${esc(file.context)}</div><div>${esc(file.type)}</div><div><span class="download-link">Download ↗</span></div></a>`).join("");
   }
 
   const financial=data.scopes.filter(s=>s.showFinancials);
