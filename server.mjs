@@ -17,6 +17,8 @@ const SOURCES = {
 let cache = null;
 let cacheTime = 0;
 const CACHE_MS = 30_000;
+const SESSION_MS = 12 * 60 * 60 * 1000;
+const loginAttempts = new Map();
 
 const mime = {
   ".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8",
@@ -71,6 +73,27 @@ function number(prop, fallback = 0) {
     return Number.isFinite(parsed) ? parsed : fallback;
   }
   return fallback;
+}
+
+function safeEqual(a, b) {
+  const left=Buffer.from(String(a)),right=Buffer.from(String(b));
+  return left.length===right.length && timingSafeEqual(left,right);
+}
+
+function cookies(req) {
+  return Object.fromEntries((req.headers.cookie||"").split(";").map(x=>x.trim().split(/=(.*)/s)).filter(x=>x[0]).map(([key,val])=>[key,decodeURIComponent(val||"")]));
+}
+
+function sessionToken(expires) {
+  const secret=process.env.PORTAL_SESSION_SECRET||"";
+  return `${expires}.${createHmac("sha256",secret).update(String(expires)).digest("hex")}`;
+}
+
+function authenticated(req) {
+  const secret=process.env.PORTAL_SESSION_SECRET,token=cookies(req).portal_session;
+  if(!secret||!token)return false;
+  const [expires,signature]=token.split(".");
+  return Number(expires)>Date.now() && safeEqual(token,sessionToken(expires)) && Boolean(signature);
 }
 
 async function notion(path, options = {}) {
@@ -184,16 +207,26 @@ async function serveStatic(req,res){
   const clean=normalize(decodeURIComponent(requested)).replace(/^(\.\.[/\\])+/,"");
   let file=join(ROOT,clean==="/"?"index.html":clean);
   if(!file.startsWith(ROOT)){res.writeHead(403);res.end("Forbidden");return;}
-  try{if((await stat(file)).isDirectory())file=join(file,"index.html");const data=await readFile(file);res.writeHead(200,{"Content-Type":mime[extname(file)]||"application/octet-stream","Cache-Control":extname(file)===".html"?"no-cache":"public, max-age=3600","X-Robots-Tag":"noindex, nofollow, noarchive, nosnippet, noimageindex"});res.end(data);}catch{res.writeHead(404,{"X-Robots-Tag":"noindex, nofollow, noarchive, nosnippet, noimageindex"});res.end("Not found");}
+  try{if((await stat(file)).isDirectory())file=join(file,"index.html");let data=await readFile(file);if(file===join(ROOT,"index.html")&&!authenticated(req)){const gate=`<!-- PROTECTED_START --><section class="access-gate shell"><div><p class="label">Client Access</p><h2>Project details are protected.</h2><p>Enter the project password to view progress, files, financials, and the payment schedule.</p><form><label for="portal-password">Password</label><div class="gate-control"><input id="portal-password" name="password" type="password" autocomplete="current-password" required autofocus><button type="submit">Unlock ↗</button></div><p class="gate-message" aria-live="polite"></p></form></div></section><!-- PROTECTED_END -->`;data=Buffer.from(data.toString("utf8").replace(/<!-- PROTECTED_START -->[\s\S]*<!-- PROTECTED_END -->/,gate));}res.writeHead(200,{"Content-Type":mime[extname(file)]||"application/octet-stream","Cache-Control":extname(file)===".html"?"no-store":"public, max-age=3600","X-Robots-Tag":"noindex, nofollow, noarchive, nosnippet, noimageindex"});res.end(data);}catch{res.writeHead(404,{"X-Robots-Tag":"noindex, nofollow, noarchive, nosnippet, noimageindex"});res.end("Not found");}
 }
 
 createServer(async(req,res)=>{
   try{
-    if(req.method==="GET"&&req.url.startsWith("/api/project")){return json(res,200,await getProject());}
+    if(req.method==="POST"&&req.url==="/api/login"){
+      const ip=req.headers["x-forwarded-for"]?.split(",")[0]?.trim()||req.socket.remoteAddress||"unknown",now=Date.now();
+      const recent=(loginAttempts.get(ip)||[]).filter(time=>now-time<10*60*1000);
+      if(recent.length>=8)return json(res,429,{ok:false});
+      let payload={};try{payload=JSON.parse((await body(req)).toString("utf8"));}catch{return json(res,400,{ok:false});}
+      if(!process.env.PORTAL_PASSWORD||!safeEqual(payload.password||"",process.env.PORTAL_PASSWORD)){recent.push(now);loginAttempts.set(ip,recent);return json(res,401,{ok:false});}
+      loginAttempts.delete(ip);const expires=now+SESSION_MS;
+      res.writeHead(200,{"Content-Type":"application/json; charset=utf-8","Cache-Control":"no-store","Set-Cookie":`portal_session=${encodeURIComponent(sessionToken(expires))}; Max-Age=${SESSION_MS/1000}; Path=/; HttpOnly; Secure; SameSite=Lax`,"X-Robots-Tag":"noindex, nofollow"});return res.end('{"ok":true}');
+    }
+    if(req.method==="POST"&&req.url==="/api/logout"){res.writeHead(200,{"Content-Type":"application/json","Set-Cookie":"portal_session=; Max-Age=0; Path=/; HttpOnly; Secure; SameSite=Lax"});return res.end('{"ok":true}');}
+    if(req.method==="GET"&&req.url.startsWith("/api/project")){if(!authenticated(req))return json(res,401,{error:"Authentication required"});return json(res,200,await getProject());}
     if(req.method==="GET"&&req.url==="/health"){return json(res,200,{ok:true,notionConfigured:Boolean(process.env.NOTION_API_TOKEN)});}
     if(req.method==="POST"&&req.url==="/api/notion-webhook"){
       const raw=await body(req);let payload={};try{payload=JSON.parse(raw.toString("utf8"));}catch{return json(res,400,{ok:false});}
-      if(payload.verification_token){console.log(`NOTION_WEBHOOK_VERIFICATION_TOKEN=${payload.verification_token}`);return json(res,200,{ok:true});}
+      if(payload.verification_token){return json(res,200,{ok:true});}
       if(!validSignature(raw,req.headers["x-notion-signature"]))return json(res,401,{ok:false});
       cache=null;getProject(true).catch(error=>console.error("Notion refresh failed",error.message));return json(res,200,{ok:true});
     }
