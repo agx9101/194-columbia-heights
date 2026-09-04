@@ -8,6 +8,7 @@ const initials = company => company.split(/\s+/).map(x=>x[0]).join("").slice(0,2
 
 function wave(){const slashes="////////////////////////////////////////////////////////////////";return `<div class="slash-ribbon"><span>${slashes}</span><span aria-hidden="true">${slashes}</span></div>`;}
 function pill(status,extra=""){return `<span class="pill ${extra}">${esc(status)}</span>`;}
+function protectedMoney(value,locked,extra=""){return locked?`<button type="button" class="sensitive-value ${extra}" data-unlock aria-label="Unlock protected financial value">••••••</button>`:`<span class="${extra}">${money(value)}</span>`;}
 
 function dayKey(value){return new Date(`${value}T12:00:00`);}
 function renderGantt(items=[]){
@@ -52,25 +53,27 @@ function render(data){
   }
 
   const financial=data.scopes.filter(s=>s.showFinancials);
-  $(".financials-section .collapse-content").innerHTML=financial.map(s=>`<div class="scope-block ${scopeClass(s.company)}"><div class="scope-title"><div><span>${initials(s.company)}</span><p>${esc(s.company)}</p></div>${pill(s.status)}</div><div class="scope-grid"><div><small>Scope</small><strong>${esc(s.scope)}</strong></div><div><small>Contract fee</small><strong>${money(s.fee)}</strong></div><div><small>Paid to date</small><strong class="paid-money">${money(s.paidToDate)}</strong></div><div><small>Balance</small><strong>${money(s.balance)}</strong></div></div></div>`).join("");
+  $(".financials-section .collapse-content").innerHTML=financial.map(s=>`<div class="scope-block ${scopeClass(s.company)}"><div class="scope-title"><div><span>${initials(s.company)}</span><p>${esc(s.company)}</p></div>${pill(s.status)}</div><div class="scope-grid"><div><small>Scope</small><strong>${esc(s.scope)}</strong></div><div><small>Contract fee</small><strong>${protectedMoney(s.fee,data.locked)}</strong></div><div><small>Paid to date</small><strong>${protectedMoney(s.paidToDate,data.locked,"paid-money")}</strong></div><div><small>Balance</small><strong>${protectedMoney(s.balance,data.locked)}</strong></div></div></div>`).join("");
 
   const schedule=$(".payments-section .collapse-content");
-  schedule.innerHTML=financial.map(s=>{const rows=data.payments.filter(x=>x.scopeIds.includes(s.id)).map(x=>`<div class="tr ${/paid/i.test(x.status)?"paid":""}"><div><strong>${esc(x.name)}</strong></div><div>${esc(x.type)}</div><div>${money(x.amount)}</div><div>${pill(/paid/i.test(x.status)?"✓ Paid":x.status,/paid/i.test(x.status)?"paid-pill":"draft")}</div></div>`).join("");return `<h3 class="table-group ${scopeClass(s.company)}-text">${esc(s.company)} · ${esc(s.scope)}</h3><div class="data-table payments"><div class="tr th"><div>Payment</div><div>Type</div><div>Amount</div><div>Status</div></div>${rows}</div>`;}).join("");
+  schedule.innerHTML=financial.map(s=>{const rows=data.payments.filter(x=>x.scopeIds.includes(s.id)).map(x=>`<div class="tr ${/paid/i.test(x.status)?"paid":""}"><div><strong>${esc(x.name)}</strong></div><div>${esc(x.type)}</div><div>${protectedMoney(x.amount,data.locked)}</div><div>${pill(/paid/i.test(x.status)?"✓ Paid":x.status,/paid/i.test(x.status)?"paid-pill":"draft")}</div></div>`).join("");return `<h3 class="table-group ${scopeClass(s.company)}-text">${esc(s.company)} · ${esc(s.scope)}</h3><div class="data-table payments"><div class="tr th"><div>Payment</div><div>Type</div><div>Amount</div><div>Status</div></div>${rows}</div>`;}).join("");
   document.body.dataset.synced="true";
 }
 
 async function sync(){try{const response=await fetch("/api/project",{cache:"no-store"});if(response.ok)render(await response.json());}catch{}}
-const gate=$(".access-gate");
-if(gate){
-  gate.querySelector("form").addEventListener("submit",async event=>{
+const dialog=$(".value-dialog");
+document.addEventListener("click",event=>{if(event.target.closest("[data-unlock]")){dialog.showModal();dialog.querySelector("input").focus();}});
+dialog.querySelector(".dialog-close").addEventListener("click",()=>dialog.close());
+dialog.addEventListener("click",event=>{if(event.target===dialog)dialog.close();});
+dialog.querySelector("form").addEventListener("submit",async event=>{
     event.preventDefault();
     const form=event.currentTarget,button=form.querySelector("button"),message=form.querySelector(".gate-message");
     button.disabled=true;message.textContent="Checking…";
     try{
       const response=await fetch("/api/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({password:new FormData(form).get("password")})});
-      if(response.ok){location.reload();return;}
+      if(response.ok){dialog.close();form.reset();message.textContent="";await sync();return;}
       message.textContent=response.status===429?"Too many attempts. Try again shortly.":"Incorrect password.";
     }catch{message.textContent="Unable to connect. Try again.";}
     button.disabled=false;form.password.focus();
-  });
-}else{sync();setInterval(sync,10000);}
+});
+sync();setInterval(sync,10000);
