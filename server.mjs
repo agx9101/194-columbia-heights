@@ -196,7 +196,8 @@ function publicProject(data) {
   return {
     ...data, locked:true,
     scopes:data.scopes.map(scope=>({...scope,fee:null,paidToDate:null,balance:null})),
-    payments:data.payments.map(payment=>({...payment,amount:null}))
+    payments:data.payments.map(payment=>({...payment,amount:null})),
+    downloads:data.downloads.map(file=>({...file,url:null}))
   };
 }
 
