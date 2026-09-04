@@ -192,6 +192,14 @@ async function getProject(force=false) {
   cache=await loadProject(); cacheTime=Date.now(); return cache;
 }
 
+function publicProject(data) {
+  return {
+    ...data, locked:true,
+    scopes:data.scopes.map(scope=>({...scope,fee:null,paidToDate:null,balance:null})),
+    payments:data.payments.map(payment=>({...payment,amount:null}))
+  };
+}
+
 function json(res,status,data){res.writeHead(status,{"Content-Type":"application/json; charset=utf-8","Cache-Control":"no-store","X-Robots-Tag":"noindex, nofollow, noarchive, nosnippet, noimageindex"});res.end(JSON.stringify(data));}
 function validSignature(raw,signature){
   const secret=process.env.NOTION_WEBHOOK_VERIFICATION_TOKEN;
@@ -207,7 +215,7 @@ async function serveStatic(req,res){
   const clean=normalize(decodeURIComponent(requested)).replace(/^(\.\.[/\\])+/,"");
   let file=join(ROOT,clean==="/"?"index.html":clean);
   if(!file.startsWith(ROOT)){res.writeHead(403);res.end("Forbidden");return;}
-  try{if((await stat(file)).isDirectory())file=join(file,"index.html");let data=await readFile(file);if(file===join(ROOT,"index.html")&&!authenticated(req)){const gate=`<!-- PROTECTED_START --><section class="access-gate shell"><div><p class="label">Client Access</p><h2>Project details are protected.</h2><p>Enter the project password to view progress, files, financials, and the payment schedule.</p><form><label for="portal-password">Password</label><div class="gate-control"><input id="portal-password" name="password" type="password" autocomplete="current-password" required autofocus><button type="submit">Unlock ↗</button></div><p class="gate-message" aria-live="polite"></p></form></div></section><!-- PROTECTED_END -->`;data=Buffer.from(data.toString("utf8").replace(/<!-- PROTECTED_START -->[\s\S]*<!-- PROTECTED_END -->/,gate));}res.writeHead(200,{"Content-Type":mime[extname(file)]||"application/octet-stream","Cache-Control":extname(file)===".html"?"no-store":"public, max-age=3600","X-Robots-Tag":"noindex, nofollow, noarchive, nosnippet, noimageindex"});res.end(data);}catch{res.writeHead(404,{"X-Robots-Tag":"noindex, nofollow, noarchive, nosnippet, noimageindex"});res.end("Not found");}
+  try{if((await stat(file)).isDirectory())file=join(file,"index.html");const data=await readFile(file);res.writeHead(200,{"Content-Type":mime[extname(file)]||"application/octet-stream","Cache-Control":extname(file)===".html"?"no-store":"public, max-age=3600","X-Robots-Tag":"noindex, nofollow, noarchive, nosnippet, noimageindex"});res.end(data);}catch{res.writeHead(404,{"X-Robots-Tag":"noindex, nofollow, noarchive, nosnippet, noimageindex"});res.end("Not found");}
 }
 
 createServer(async(req,res)=>{
@@ -222,7 +230,7 @@ createServer(async(req,res)=>{
       res.writeHead(200,{"Content-Type":"application/json; charset=utf-8","Cache-Control":"no-store","Set-Cookie":`portal_session=${encodeURIComponent(sessionToken(expires))}; Max-Age=${SESSION_MS/1000}; Path=/; HttpOnly; Secure; SameSite=Lax`,"X-Robots-Tag":"noindex, nofollow"});return res.end('{"ok":true}');
     }
     if(req.method==="POST"&&req.url==="/api/logout"){res.writeHead(200,{"Content-Type":"application/json","Set-Cookie":"portal_session=; Max-Age=0; Path=/; HttpOnly; Secure; SameSite=Lax"});return res.end('{"ok":true}');}
-    if(req.method==="GET"&&req.url.startsWith("/api/project")){if(!authenticated(req))return json(res,401,{error:"Authentication required"});return json(res,200,await getProject());}
+    if(req.method==="GET"&&req.url.startsWith("/api/project")){const data=await getProject();return json(res,200,authenticated(req)?{...data,locked:false}:publicProject(data));}
     if(req.method==="GET"&&req.url==="/health"){return json(res,200,{ok:true,notionConfigured:Boolean(process.env.NOTION_API_TOKEN)});}
     if(req.method==="POST"&&req.url==="/api/notion-webhook"){
       const raw=await body(req);let payload={};try{payload=JSON.parse(raw.toString("utf8"));}catch{return json(res,400,{ok:false});}
