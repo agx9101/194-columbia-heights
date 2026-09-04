@@ -1,0 +1,22 @@
+/* Cinematic project reveal — preserves the live portal underneath. */
+.reveal-overlay{position:fixed;inset:0;z-index:9999;overflow:hidden;background:#030303;color:#f5f5f2;opacity:1;transition:opacity .85s cubic-bezier(.22,.61,.36,1);font-family:Manrope,Arial,sans-serif}
+.reveal-overlay.is-ending{opacity:0;pointer-events:none}
+.reveal-overlay::before{content:"";position:absolute;inset:0;z-index:3;pointer-events:none;background:radial-gradient(circle at 50% 45%,transparent 28%,rgba(0,0,0,.12) 60%,rgba(0,0,0,.52) 100%)}
+.reveal-brand,.reveal-project,.reveal-skip{position:absolute;z-index:6;font-family:"DM Mono",monospace;text-transform:uppercase;letter-spacing:.08em}
+.reveal-brand{left:28px;top:25px;font-size:11px;color:rgba(255,255,255,.68)}
+.reveal-project{left:28px;bottom:25px;font-size:11px;color:rgba(255,255,255,.56)}
+.reveal-skip{right:22px;top:18px;border:1px solid rgba(255,255,255,.25);border-radius:999px;background:rgba(10,10,10,.28);backdrop-filter:blur(10px);color:#fff;font-size:10px;padding:8px 11px;cursor:pointer;transition:background .2s,border-color .2s}
+.reveal-skip:hover{background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.5)}
+.reveal-stage{position:absolute;inset:0;overflow:hidden;perspective:2200px}
+.reveal-page{position:absolute;left:50%;top:0;width:1440px;background:var(--paper);color:var(--ink);transform-origin:50% 0;will-change:transform,opacity;box-shadow:0 44px 130px rgba(0,0,0,.42);border-radius:2px;overflow:hidden}
+.reveal-page .shell{width:calc(100% - 72px)}
+.reveal-page .collapsible-section details{display:block}
+.reveal-page .collapsible-section details>.collapse-content{display:block!important}
+.reveal-page .collapsible-section details>summary{pointer-events:none}
+.reveal-page .milestone-gantt[hidden],.reveal-page .downloads-wrap[hidden]{display:none!important}
+.reveal-flash{position:absolute;inset:0;z-index:5;background:#fff;opacity:0;pointer-events:none}
+body.reveal-running{overflow:hidden;background:#030303}
+body.reveal-running>header:not(.reveal-overlay *),body.reveal-running>main,body.reveal-running>footer{visibility:hidden}
+@media(max-width:900px){.reveal-brand{left:16px;top:16px}.reveal-project{left:16px;bottom:16px}.reveal-skip{right:12px;top:10px}.reveal-page{width:760px}.reveal-page .shell{width:calc(100% - 32px)}}
+@media(max-width:520px){.reveal-page{width:390px}.reveal-page .shell{width:calc(100% - 24px)}.reveal-overlay::before{background:radial-gradient(circle at 50% 42%,transparent 22%,rgba(0,0,0,.15) 58%,rgba(0,0,0,.6) 100%)}}
+@media(prefers-reduced-motion:reduce){.reveal-overlay{display:none!important}body.reveal-running{overflow:auto;background:var(--paper)}body.reveal-running>header:not(.reveal-overlay *),body.reveal-running>main,body.reveal-running>footer{visibility:visible}}
