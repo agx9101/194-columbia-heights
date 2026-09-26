@@ -1,244 +1,155 @@
-import { createServer } from "node:http";
-import { readFile, stat } from "node:fs/promises";
-import { createHmac, timingSafeEqual } from "node:crypto";
-import { extname, join, normalize } from "node:path";
+import { createServer } from 'node:http';
+import { readFile } from 'node:fs/promises';
+import { createHmac, createHash, timingSafeEqual } from 'node:crypto';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { dirname, join } from 'node:path';
 
-const PORT = Number(process.env.PORT || 10000);
-const ROOT = join(process.cwd(), "dist");
-const PROJECT_ID = process.env.NOTION_PROJECT_PAGE_ID || "3cf19be7-b9d8-8188-82ff-f9e925ae0352";
-const NOTION_VERSION = "2025-09-03";
-const SOURCES = {
-  milestones: "7eef80b4-6b63-4f09-a91a-dc8ef2f51413",
-  deliverables: "16d61f21-c120-4d12-b922-c108660d638f",
-  scopes: "323e95e4-b890-4222-976e-f61c6b8199e2",
-  payments: "017eab8a-7b7d-476c-8d6a-6554cb35ab06"
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), 'dist');
+const VERSION = '2025-09-03'; // Deliberately pinned, not a claim to be the latest API version.
+const TTL = 30_000, SESSION = 12 * 60 * 60 * 1000;
+const sourceKeys = { scopes:'SCOPES', payments:'PAYMENTS', assets:'ASSETS', updates:'UPDATES', milestones:'MILESTONES', ffe:'FFE' };
+const norm = id => String(id || '').replaceAll('-', '').toLowerCase();
+const uuid = id => /^[0-9a-f]{32}$/i.test(norm(id));
+const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+export const val = p => {
+  if (!p) return null;
+  if (p.type === 'title' || p.type === 'rich_text') return (p[p.type] || []).map(x => x.plain_text ?? x.text?.content ?? '').join('');
+  if (p.type === 'select' || p.type === 'status') return p[p.type]?.name ?? null;
+  if (p.type === 'date') return p.date?.start ?? null;
+  if (p.type === 'relation') return (p.relation || []).map(x => x.id);
+  if (p.type === 'people') return (p.people || []).map(x => ({name:x.name || '', avatar:safeURL(x.avatar_url)}));
+  return ['number','checkbox','url'].includes(p.type) ? p[p.type] : null;
 };
-
-let cache = null;
-let cacheTime = 0;
-const CACHE_MS = 30_000;
-const SESSION_MS = 12 * 60 * 60 * 1000;
-const loginAttempts = new Map();
-
-const mime = {
-  ".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8",
-  ".js": "text/javascript; charset=utf-8", ".png": "image/png", ".webp": "image/webp",
-  ".svg": "image/svg+xml", ".ico": "image/x-icon"
+export function safeURL(raw) { try { const u = new URL(raw); return u.protocol === 'https:' ? u.href : null; } catch { return null; } }
+const files = (p, key) => (p?.[key]?.files || []).map(f => ({name:f.name || 'File', url:safeURL(f.file?.url || f.external?.url)})).filter(f => f.url);
+const number = p => { const n=val(p); return typeof n === 'number' && Number.isFinite(n) ? n : null; };
+const sum = list => Math.round(list.reduce((a,b)=>a+(b || 0),0)*100)/100;
+const sameSecret = (a,b) => timingSafeEqual(createHash('sha256').update(String(a)).digest(), createHash('sha256').update(String(b)).digest());
+const header = {
+  'Cache-Control':'no-store', 'X-Robots-Tag':'noindex, nofollow, noarchive, nosnippet, noimageindex',
+  'X-Content-Type-Options':'nosniff', 'Referrer-Policy':'no-referrer', 'X-Frame-Options':'DENY',
+  'Content-Security-Policy':"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' https: data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
 };
+function reply(res, status, data, extra={}) { res.writeHead(status, {...header,'Content-Type':'application/json; charset=utf-8',...extra}); res.end(JSON.stringify(data)); }
 
-function text(prop) {
-  const parts = prop?.title || prop?.rich_text || [];
-  return parts.map(item => item.plain_text || item.text?.content || "").join("");
-}
-function value(prop) {
-  if (!prop) return null;
-  if (prop.type === "title" || prop.type === "rich_text") return text(prop);
-  if (prop.type === "url") return prop.url;
-  if (prop.type === "number") return prop.number;
-  if (prop.type === "checkbox") return prop.checkbox;
-  if (prop.type === "select") return prop.select?.name || null;
-  if (prop.type === "status") return prop.status?.name || null;
-  if (prop.type === "date") return prop.date?.start || null;
-  if (prop.type === "people") return (prop.people || []).map(p => ({ id:p.id, name:p.name, avatar:p.avatar_url }));
-  if (prop.type === "relation") return (prop.relation || []).map(r => r.id);
-  if (prop.type === "formula") return prop.formula?.number ?? prop.formula?.string ?? prop.formula?.boolean ?? null;
-  if (prop.type === "rollup") return prop.rollup?.number ?? null;
-  return null;
-}
-
-function propertyFiles(properties = {}) {
-  return Object.entries(properties).flatMap(([property, prop]) => {
-    if (prop?.type !== "files") return [];
-    return (prop.files || []).map(file => ({
-      name: file.name || property,
-      url: file.file?.url || file.external?.url || null,
-      kind: property
-    })).filter(file => file.url);
+// Defense in depth: query filters AND serialization filters both enforce tenant/visibility boundaries.
+export function buildProject(page, records, projectId) {
+  if (norm(page.id) !== norm(projectId) || val(page.properties?.['Client Visible']) !== true || page.archived || page.in_trash) throw new Error('Project unavailable');
+  const p = page.properties || {};
+  const selected = key => (records[key] || []).filter(r => !r.archived && !r.in_trash && val(r.properties?.['Client Visible']) === true && (val(r.properties?.Project) || []).some(id => norm(id) === norm(projectId)));
+  const showFinancials = val(p['Show Financials']) === true, showFFE = val(p['Show FFE']) === true, showSchedule = val(p['Show Schedule']) === true;
+  const scopesRaw = selected('scopes');
+  const scopeIds = new Set(scopesRaw.map(r=>norm(r.id)));
+  const financeIds = new Set(scopesRaw.filter(r=>showFinancials && val(r.properties?.['Show Financials'])===true).map(r=>norm(r.id)));
+  const paymentRows = selected('payments').filter(r => (val(r.properties?.Scope)||[]).some(id=>financeIds.has(norm(id))));
+  const payments = paymentRows.map(r=>{const q=r.properties;return {id:r.id,name:val(q.Payment),type:val(q.Type),amount:number(q.Amount),status:val(q.Status),scopeIds:val(q.Scope)||[],invoice:val(q['Invoice #']),due:val(q['Due Date']),paidDate:val(q['Paid Date'])};}).sort((a,b)=>a.name.localeCompare(b.name,undefined,{numeric:true}));
+  const scopes = scopesRaw.map(r=>{
+    const q=r.properties, financial=financeIds.has(norm(r.id));
+    const received=sum(payments.filter(x=>x.status==='Paid' && x.scopeIds.some(id=>norm(id)===norm(r.id))).map(x=>x.amount));
+    const fee=financial?number(q.Fee):null, progress=number(q['Progress %']);
+    return {id:r.id,name:val(q.Scope),company:val(q.Company),status:val(q.Status),milestone:val(q['Current Milestone']),progress:progress===null?null:Math.max(0,Math.min(100,progress)),fee,received:financial?received:null,remaining:fee===null?null:Math.round((fee-received)*100)/100,showFinancials:financial};
   });
+  const assets = selected('assets').filter(r=>val(r.properties.Current)===true && val(r.properties.Status)==='Current').map(r=>{const q=r.properties;return {id:r.id,name:val(q.Asset),category:val(q.Category),status:val(q.Status),issued:val(q['Issue Date']),description:val(q.Description),order:number(q['Sort Order'])??999,url:safeURL(val(q['External URL'])),files:files(q,'File')};}).sort((a,b)=>a.order-b.order);
+  const downloads = scopesRaw.filter(r=>financeIds.has(norm(r.id))).flatMap(r=>files(r.properties,'Files').map(f=>({...f,context:val(r.properties.Scope)})));
+  const updates = selected('updates').map(r=>{const q=r.properties;return {name:val(q.Update),date:val(q.Date),summary:val(q.Summary),status:val(q.Status),pinned:val(q.Pinned)===true};}).sort((a,b)=>Number(b.pinned)-Number(a.pinned)||String(b.date||'').localeCompare(a.date||''));
+  const milestones = showSchedule ? selected('milestones').map(r=>{const q=r.properties;return {name:val(q.Milestone),status:val(q.Status),party:val(q['Responsible Party']),date:val(q['Target Date']),completed:val(q['Completed Date']),notes:val(q.Notes),sequence:number(q.Sequence)??999};}).sort((a,b)=>a.sequence-b.sequence) : [];
+  const ffe = showFFE ? selected('ffe').map(r=>{const q=r.properties;return {name:val(q['FFE Item']),type:val(q.Type),room:val(q.Room),qty:number(q.Qty),unit:val(q.Unit),vendor:val(q.Vendor),manufacturer:val(q.Manufacturer),model:val(q.Model),price:showFinancials&&val(q['Show Pricing'])===true?number(q['Unit Price']):null,url:safeURL(val(q['Purchase URL'])),image:files(q,'Image')[0]||null,approved:val(q.Approved)===true,ordered:val(q.Ordered)===true,delivered:val(q.Delivered)===true,eta:val(q.ETA),notes:val(q.Notes)};}).filter(x=>x.name) : [];
+  const hero = files(p,'Files & media').find(f=>/\.(jpe?g|png|webp|gif)(?:$|\?)/i.test(f.name)) || null;
+  return { project:{ name:val(p.Project)||'Client Project',address:val(p.Address),summary:val(p['Project Summary']),status:val(p.Status),phase:val(p.Phase),milestone:val(p['Current Milestone']),lead:(val(p['Project Lead'])||[])[0]||null,lastUpdated:val(p['Last Client Update']),area:number(p['Area SF']),allowance:showFinancials?number(p['FFE Allowance']):null,procurement:val(p['Procurement Status']),hero,cintoo:safeURL(val(p.Cintoo)),acc:safeURL(val(p.ACC)),showFinancials,showFFE,showSchedule }, scopes,payments,assets,downloads,updates,milestones,ffe,syncedAt:new Date().toISOString() };
 }
 
-function pageFiles(page, context, scopeIds = []) {
-  const attached = propertyFiles(page.properties || {});
-  return attached.map((file, index) => ({
-    id:`${page.id}-${index}`, name:file.name || context, url:file.url,
-    type:file.kind || "File", context, scopeIds
-  }));
-}
-
-function number(prop, fallback = 0) {
-  const raw = value(prop);
-  if (typeof raw === "number") return Number.isFinite(raw) ? raw : fallback;
-  if (typeof raw === "string") {
-    const parsed = Number(raw.replace(/[^0-9.-]/g, ""));
-    return Number.isFinite(parsed) ? parsed : fallback;
+export function makeServer(env=process.env, transport=fetch) {
+  const projectId=env.NOTION_PROJECT_PAGE_ID;
+  const sources=Object.fromEntries(Object.entries(sourceKeys).map(([k,v])=>[k,env[`NOTION_${v}_DATA_SOURCE_ID`]]));
+  const authReady=Boolean(env.PORTAL_PASSWORD && env.PORTAL_PASSWORD.length>=12 && env.PORTAL_SESSION_SECRET?.length>=32 && uuid(projectId));
+  const dataReady=Boolean(env.NOTION_API_TOKEN && uuid(projectId) && Object.values(sources).every(uuid));
+  const secure=env.NODE_ENV==='production' || Boolean(env.RENDER);
+  const cookie=(value,age)=>`portal_session=${value}; Max-Age=${age}; Path=/; HttpOnly; SameSite=Strict${secure?'; Secure':''}`;
+  const signed=expiry=>`${expiry}.${createHmac('sha256',env.PORTAL_SESSION_SECRET||'').update(`${norm(projectId)}:${expiry}`).digest('hex')}`;
+  const authenticated=req=>{
+    if (!authReady) return false;
+    const token=(req.headers.cookie||'').split(';').map(x=>x.trim()).find(x=>x.startsWith('portal_session='))?.slice(15);
+    if (!token || token.length>100) return false;
+    const exp=token.split('.')[0], now=Date.now();
+    return /^\d+$/.test(exp) && Number(exp)>now && Number(exp)<=now+SESSION && sameSecret(token,signed(exp));
+  };
+  const attempts=new Map(); let cache=null, cacheAt=0, pending=null, queue=Promise.resolve(), lastRequest=0;
+  async function notion(path, options={}) {
+    const run=async()=>{
+      for(let attempt=0;attempt<3;attempt++) {
+        await wait(Math.max(0,350-(Date.now()-lastRequest))); lastRequest=Date.now();
+        const response=await transport(`https://api.notion.com/v1${path}`,{...options,signal:AbortSignal.timeout(15000),headers:{Authorization:`Bearer ${env.NOTION_API_TOKEN}`,'Notion-Version':VERSION,'Content-Type':'application/json'}});
+        if(response.status===429 || response.status>=500) { const sec=Number(response.headers.get('retry-after'))||1; if(attempt<2){await wait(Math.min(10,sec)*1000);continue;} }
+        if(!response.ok) throw new Error(`Notion request failed (${response.status})`);
+        return response.json();
+      }
+    };
+    const task=queue.then(run,run); queue=task.catch(()=>{}); return task;
   }
-  return fallback;
-}
-
-function safeEqual(a, b) {
-  const left=Buffer.from(String(a)),right=Buffer.from(String(b));
-  return left.length===right.length && timingSafeEqual(left,right);
-}
-
-function cookies(req) {
-  return Object.fromEntries((req.headers.cookie||"").split(";").map(x=>x.trim().split(/=(.*)/s)).filter(x=>x[0]).map(([key,val])=>[key,decodeURIComponent(val||"")]));
-}
-
-function sessionToken(expires) {
-  const secret=process.env.PORTAL_SESSION_SECRET||"";
-  return `${expires}.${createHmac("sha256",secret).update(String(expires)).digest("hex")}`;
-}
-
-function authenticated(req) {
-  const secret=process.env.PORTAL_SESSION_SECRET,token=cookies(req).portal_session;
-  if(!secret||!token)return false;
-  const [expires,signature]=token.split(".");
-  return Number(expires)>Date.now() && safeEqual(token,sessionToken(expires)) && Boolean(signature);
-}
-
-async function notion(path, options = {}) {
-  const token = process.env.NOTION_API_TOKEN;
-  if (!token) throw new Error("NOTION_API_TOKEN is not configured");
-  const response = await fetch(`https://api.notion.com/v1${path}`, {
-    ...options,
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Notion-Version": NOTION_VERSION,
-      "Content-Type": "application/json",
-      ...(options.headers || {})
+  async function query(id) {
+    const rows=[]; let cursor;
+    for(let page=0;page<100;page++) {
+      const result=await notion(`/data_sources/${id}/query`,{method:'POST',body:JSON.stringify({page_size:100,...(cursor?{start_cursor:cursor}:{}),filter:{and:[{property:'Project',relation:{contains:projectId}},{property:'Client Visible',checkbox:{equals:true}}]}})});
+      rows.push(...(result.results||[]));
+      if(!result.has_more) return rows;
+      if(!result.next_cursor || result.next_cursor===cursor) throw new Error('Invalid pagination');
+      cursor=result.next_cursor;
     }
+    throw new Error('Data source exceeds configured page limit');
+  }
+  async function project() {
+    if(!dataReady) throw new Error('Project integration not configured');
+    if(cache && Date.now()-cacheAt<TTL) return cache;
+    if(pending) return pending;
+    pending=(async()=>{
+      const page=await notion(`/pages/${projectId}`);
+      if(val(page.properties?.['Client Visible'])!==true || page.archived || page.in_trash) throw new Error('Project unavailable');
+      const records={};
+      for(const [key,id] of Object.entries(sources)) {
+        const skip=(key==='ffe'&&val(page.properties?.['Show FFE'])!==true)||(key==='milestones'&&val(page.properties?.['Show Schedule'])!==true)||(key==='payments'&&val(page.properties?.['Show Financials'])!==true);
+        records[key]=skip?[]:await query(id);
+      }
+      const result=buildProject(page,records,projectId); cache=result; cacheAt=Date.now(); return result;
+    })();
+    try{return await pending;}finally{pending=null;}
+  }
+  async function payload(req) {
+    let size=0; const parts=[];
+    for await(const part of req){size+=part.length;if(size>8192)throw new Error('Request too large');parts.push(part);}
+    return JSON.parse(Buffer.concat(parts).toString('utf8')||'{}');
+  }
+  const staticFiles={'/':['index.html','text/html'],'/index.html':['index.html','text/html'],'/app.js':['app.js','text/javascript'],'/styles.css':['styles.css','text/css'],'/portal.css':['portal.css','text/css'],'/robots.txt':['robots.txt','text/plain']};
+  const server=createServer(async(req,res)=>{
+    try {
+      const path=new URL(req.url,'http://localhost').pathname;
+      if(req.method==='POST'){
+        if(req.headers.origin && new URL(req.headers.origin).host!==req.headers.host)return reply(res,403,{error:'Request rejected'});
+        if(req.headers['sec-fetch-site']==='cross-site')return reply(res,403,{error:'Request rejected'});
+      }
+      if(path==='/health'&&req.method==='GET')return reply(res,200,{ok:true});
+      if(path==='/api/session'&&req.method==='GET')return reply(res,200,{authenticated:authenticated(req),ready:authReady&&dataReady});
+      if(path==='/api/login'&&req.method==='POST'){
+        if(!authReady||!dataReady)return reply(res,503,{error:'This portal is awaiting configuration.'});
+        const now=Date.now(),ip=String(req.headers['x-forwarded-for']||req.socket.remoteAddress).split(',')[0].trim();
+        for(const [key,value]of attempts){if(now-value.start>600000)attempts.delete(key);}
+        const rec=attempts.get(ip)||{start:now,count:0};
+        if(rec.count>=8 || attempts.size>1000)return reply(res,429,{error:'Too many attempts. Try again later.'},{'Retry-After':'600'});
+        let body;try{body=await payload(req);}catch{return reply(res,400,{error:'Invalid request'});}
+        if(typeof body.password!=='string'||!sameSecret(body.password,env.PORTAL_PASSWORD)){attempts.set(ip,{...rec,count:rec.count+1});return reply(res,401,{error:'Incorrect project password.'});}
+        attempts.delete(ip);return reply(res,200,{ok:true},{'Set-Cookie':cookie(signed(now+SESSION),SESSION/1000)});
+      }
+      if(path==='/api/logout'&&req.method==='POST')return reply(res,200,{ok:true},{'Set-Cookie':cookie('',0)});
+      if(path==='/api/project'&&req.method==='GET'){
+        if(!authenticated(req))return reply(res,401,{error:'Project password required.'});
+        return reply(res,200,await project());
+      }
+      if((req.method==='GET'||req.method==='HEAD')&&staticFiles[path]){
+        const [name,type]=staticFiles[path];const bytes=await readFile(join(ROOT,name));res.writeHead(200,{...header,'Content-Type':`${type}; charset=utf-8`});return res.end(req.method==='HEAD'?undefined:bytes);
+      }
+      return reply(res,404,{error:'Not found'});
+    } catch(error) { console.error('Portal request failed:',error.name); if(!res.headersSent)return reply(res,503,{error:'Project data is temporarily unavailable. Please retry shortly.'});res.end(); }
   });
-  if (!response.ok) throw new Error(`Notion ${response.status}: ${await response.text()}`);
-  return response.json();
+  server.requestTimeout=20000;server.headersTimeout=15000;
+  return server;
 }
-
-async function querySource(id) {
-  const body = { page_size: 100, filter: { property: "Project", relation: { contains: PROJECT_ID } } };
-  const data = await notion(`/data_sources/${id}/query`, { method:"POST", body:JSON.stringify(body) });
-  return data.results || [];
-}
-
-async function queryMilestones() {
-  const body = { page_size: 100, filter: { property: "Client Visible", checkbox: { equals: true } } };
-  const data = await notion(`/data_sources/${SOURCES.milestones}/query`, { method:"POST", body:JSON.stringify(body) });
-  return data.results || [];
-}
-
-function visible(page) { return value(page.properties?.["Client Visible"]) !== false; }
-
-async function loadProject() {
-  const [project, scopesRaw, assetsRaw, paymentsRaw, milestonesRaw] = await Promise.all([
-    notion(`/pages/${PROJECT_ID}`), querySource(SOURCES.scopes),
-    querySource(SOURCES.deliverables), querySource(SOURCES.payments), queryMilestones()
-  ]);
-  const p = project.properties || {};
-  const scopes = scopesRaw.filter(visible).map(row => {
-    const x = row.properties || {};
-    const fee = number(x.Fee);
-    const paidToDate = number(x["Paid To Date"]);
-    const storedBalance = number(x.Balance, Number.NaN);
-    return {
-      id: row.id, scope:value(x.Scope) || "", company:value(x.Company) || "",
-      milestone:value(x["Current Milestone"]) || "", fee,
-      paidToDate, balance:Number.isFinite(storedBalance) ? storedBalance : fee - paidToDate,
-      progress:Math.max(0,Math.min(100,Number(value(x["Progress %"]) || 0))),
-      status:value(x.Status) || "", showFinancials:value(x["Show Financials"]) !== false
-    };
-  }).filter(scope => !/ffe/i.test(`${scope.scope} ${scope.company}`));
-  const visibleAssets = assetsRaw.filter(visible);
-  const visiblePayments = paymentsRaw.filter(visible);
-  const deliverables = visibleAssets.map(row => {
-    const x=row.properties || {};
-    return { name:value(x.Asset)||"", category:value(x.Category)||"", discipline:value(x.Discipline)||"",
-      issued:value(x["Issue Date"]), status:value(x.Status)||"", current:value(x.Current)!==false,
-      order:Number(value(x["Sort Order"])||0), url:value(x["External URL"])||null };
-  }).filter(x=>x.current).sort((a,b)=>a.order-b.order);
-  const payments = visiblePayments.map(row => {
-    const x=row.properties || {};
-    return { id:row.id, name:value(x.Payment)||"", type:value(x.Type)||"", amount:number(x.Amount),
-      status:value(x.Status)||"", scopeIds:value(x.Scope)||[] };
-  }).sort((a,b) => {
-    const paymentNumber = name => Number(name.match(/\bpayment\s*(\d+)/i)?.[1] ?? Number.MAX_SAFE_INTEGER);
-    return paymentNumber(a.name) - paymentNumber(b.name) || a.name.localeCompare(b.name, undefined, { numeric:true });
-  });
-  const downloads = ([
-    ...scopesRaw.filter(visible).map(row => pageFiles(row, value(row.properties?.Scope) || "Scope", [row.id])),
-    ...visibleAssets.map(row => pageFiles(row, value(row.properties?.Asset) || "Deliverable", value(row.properties?.Scope) || [])),
-    ...visiblePayments.map(row => pageFiles(row, value(row.properties?.Payment) || "Payment", value(row.properties?.Scope) || []))
-  ]).flat();
-  const milestones = milestonesRaw.map(row => {
-    const x = row.properties || {};
-    return {
-      id:row.id, name:value(x.Milestone)||"", notes:value(x.Notes)||"",
-      party:value(x["Responsible Party"])||"", status:value(x.Status)||"",
-      sequence:number(x.Sequence, 999), start:x["Target Date"]?.date?.start||null,
-      end:x["Target Date"]?.date?.end||x["Target Date"]?.date?.start||null
-    };
-  }).filter(item => item.name && item.start).sort((a,b) => a.sequence-b.sequence || a.start.localeCompare(b.start));
-  return {
-    project: {
-      name:value(p.Project)||"194 Columbia Heights", address:value(p.Address)||"", status:value(p.Status)||"",
-      phase:value(p.Phase)||"", milestone:value(p["Current Milestone"])||"", lastUpdated:value(p["Last Client Update"]),
-      lastEditedAt:project.last_edited_time || null,
-      cintoo:value(p.Cintoo)||null, acc:value(p.ACC)||null, lead:(value(p["Project Lead"])||[])[0]||null,
-      showFinancials:value(p["Show Financials"])!==false, showSchedule:value(p["Show Schedule"])===true,
-      showFFE:value(p["Show FFE"])===true
-    }, scopes, milestones, deliverables, payments, downloads, syncedAt:new Date().toISOString()
-  };
-}
-
-async function getProject(force=false) {
-  if (!force && cache && Date.now()-cacheTime<CACHE_MS) return cache;
-  cache=await loadProject(); cacheTime=Date.now(); return cache;
-}
-
-function publicProject(data) {
-  return {
-    ...data, locked:true,
-    scopes:data.scopes.map(scope=>({...scope,fee:null,paidToDate:null,balance:null})),
-    payments:data.payments.map(payment=>({...payment,amount:null})),
-    downloads:data.downloads.map(file=>({...file,url:null}))
-  };
-}
-
-function json(res,status,data){res.writeHead(status,{"Content-Type":"application/json; charset=utf-8","Cache-Control":"no-store","X-Robots-Tag":"noindex, nofollow, noarchive, nosnippet, noimageindex"});res.end(JSON.stringify(data));}
-function validSignature(raw,signature){
-  const secret=process.env.NOTION_WEBHOOK_VERIFICATION_TOKEN;
-  if(!secret||!signature)return false;
-  const expected=`sha256=${createHmac("sha256",secret).update(raw).digest("hex")}`;
-  const a=Buffer.from(expected),b=Buffer.from(signature);return a.length===b.length&&timingSafeEqual(a,b);
-}
-
-async function body(req){const chunks=[];for await(const chunk of req)chunks.push(chunk);return Buffer.concat(chunks);}
-
-async function serveStatic(req,res){
-  const requested=new URL(req.url,"http://localhost").pathname;
-  const clean=normalize(decodeURIComponent(requested)).replace(/^(\.\.[/\\])+/,"");
-  let file=join(ROOT,clean==="/"?"index.html":clean);
-  if(!file.startsWith(ROOT)){res.writeHead(403);res.end("Forbidden");return;}
-  try{if((await stat(file)).isDirectory())file=join(file,"index.html");const data=await readFile(file);res.writeHead(200,{"Content-Type":mime[extname(file)]||"application/octet-stream","Cache-Control":extname(file)===".html"?"no-store":"public, max-age=3600","X-Robots-Tag":"noindex, nofollow, noarchive, nosnippet, noimageindex"});res.end(data);}catch{res.writeHead(404,{"X-Robots-Tag":"noindex, nofollow, noarchive, nosnippet, noimageindex"});res.end("Not found");}
-}
-
-createServer(async(req,res)=>{
-  try{
-    if(req.method==="POST"&&req.url==="/api/login"){
-      const ip=req.headers["x-forwarded-for"]?.split(",")[0]?.trim()||req.socket.remoteAddress||"unknown",now=Date.now();
-      const recent=(loginAttempts.get(ip)||[]).filter(time=>now-time<10*60*1000);
-      if(recent.length>=8)return json(res,429,{ok:false});
-      let payload={};try{payload=JSON.parse((await body(req)).toString("utf8"));}catch{return json(res,400,{ok:false});}
-      if(!process.env.PORTAL_PASSWORD||!safeEqual(payload.password||"",process.env.PORTAL_PASSWORD)){recent.push(now);loginAttempts.set(ip,recent);return json(res,401,{ok:false});}
-      loginAttempts.delete(ip);const expires=now+SESSION_MS;
-      res.writeHead(200,{"Content-Type":"application/json; charset=utf-8","Cache-Control":"no-store","Set-Cookie":`portal_session=${encodeURIComponent(sessionToken(expires))}; Max-Age=${SESSION_MS/1000}; Path=/; HttpOnly; Secure; SameSite=Lax`,"X-Robots-Tag":"noindex, nofollow"});return res.end('{"ok":true}');
-    }
-    if(req.method==="POST"&&req.url==="/api/logout"){res.writeHead(200,{"Content-Type":"application/json","Set-Cookie":"portal_session=; Max-Age=0; Path=/; HttpOnly; Secure; SameSite=Lax"});return res.end('{"ok":true}');}
-    if(req.method==="GET"&&req.url.startsWith("/api/project")){const data=await getProject();return json(res,200,authenticated(req)?{...data,locked:false}:publicProject(data));}
-    if(req.method==="GET"&&req.url==="/health"){return json(res,200,{ok:true,notionConfigured:Boolean(process.env.NOTION_API_TOKEN)});}
-    if(req.method==="POST"&&req.url==="/api/notion-webhook"){
-      const raw=await body(req);let payload={};try{payload=JSON.parse(raw.toString("utf8"));}catch{return json(res,400,{ok:false});}
-      if(payload.verification_token){return json(res,200,{ok:true});}
-      if(!validSignature(raw,req.headers["x-notion-signature"]))return json(res,401,{ok:false});
-      cache=null;getProject(true).catch(error=>console.error("Notion refresh failed",error.message));return json(res,200,{ok:true});
-    }
-    return serveStatic(req,res);
-  }catch(error){console.error(error.message);return json(res,503,{error:"Project data is temporarily unavailable"});}
-}).listen(PORT,()=>console.log(`194 Columbia Heights portal listening on ${PORT}`));
+if(process.argv[1] && import.meta.url===pathToFileURL(process.argv[1]).href) makeServer().listen(Number(process.env.PORT||10000),'0.0.0.0',()=>console.log('Animate Lot client portal listening'));

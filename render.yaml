@@ -1,0 +1,33 @@
+# Deploy only this branch as a NEW service. Do not apply to the existing 194 service.
+services:
+  - type: web
+    name: 136-e56-11j-client-portal
+    runtime: node
+    branch: portal-template-136-e56-11j
+    plan: free
+    buildCommand: npm run build
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORTAL_SESSION_SECRET
+        generateValue: true
+      - key: PORTAL_PASSWORD
+        sync: false
+      - key: NOTION_API_TOKEN
+        sync: false
+      - key: NOTION_PROJECT_PAGE_ID
+        sync: false
+      - key: NOTION_SCOPES_DATA_SOURCE_ID
+        sync: false
+      - key: NOTION_PAYMENTS_DATA_SOURCE_ID
+        sync: false
+      - key: NOTION_ASSETS_DATA_SOURCE_ID
+        sync: false
+      - key: NOTION_UPDATES_DATA_SOURCE_ID
+        sync: false
+      - key: NOTION_MILESTONES_DATA_SOURCE_ID
+        sync: false
+      - key: NOTION_FFE_DATA_SOURCE_ID
+        sync: false
