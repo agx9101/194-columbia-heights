@@ -1,0 +1,31 @@
+name: Client portal checks
+on:
+  push:
+    branches: [portal-template-136-e56-11j]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    container: node:22-bookworm
+    timeout-minutes: 5
+    steps:
+      - name: Check out the exact pushed revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/portal-check
+          cd /tmp/portal-check
+          git init
+          git remote add origin https://github.com/agx9101/194-columbia-heights.git
+          git fetch --depth=1 origin "$GITHUB_SHA"
+          git checkout --detach FETCH_HEAD
+      - name: Validate JavaScript and run privacy and data tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd /tmp/portal-check
+          node --version
+          npm run build
+          npm test
