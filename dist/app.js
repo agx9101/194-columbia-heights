@@ -42,8 +42,21 @@ function render(data){
   $(".progress-grid").innerHTML=data.scopes.map(s=>`<article class="progress-card ${scopeClass(s.company)}"><div class="company">${esc(s.company)}</div><h3>${esc(s.scope)}</h3><p>${esc(s.milestone)}</p>${pill(s.status)}<div class="scope-progress" style="--progress:${s.progress}%" aria-label="${s.progress} percent complete"><div class="scope-progress-meta"><span>Progress</span><strong>${s.progress}%</strong></div><div class="wave-track"><div class="wave-fill" aria-hidden="true">${wave()}</div></div></div></article>`).join("");
   renderGantt(data.milestones||[]);
 
+  if(data.deliverablesState?.source==='acc'){
+    const heading='<div class="tr th" role="row"><div>Folder</div><div>File name</div><div>Updated</div><div>PDF</div></div>';
+    let contents;
+    if(data.locked) contents='<button type="button" class="acc-unlock sensitive-value" data-unlock>Unlock project PDFs ↗</button>';
+    else if(data.deliverablesState.status!=='ready') contents='<p class="acc-message" role="status">Project PDFs are temporarily unavailable. Please try again shortly.</p>';
+    else if(!data.deliverables.length) contents='<p class="acc-message">No PDFs have been added to this folder yet.</p>';
+    else contents=data.deliverables.map(d=>`<div class="tr" role="row"><div role="cell"><strong>${esc(d.folder)}</strong></div><div role="cell"><strong>${esc(d.name)}</strong>${d.version?`<small>Version ${esc(d.version)}</small>`:''}</div><div role="cell">${date(d.updated?.slice(0,10))}</div><div role="cell"><a class="download-link" href="${esc(d.url)}" target="_blank" rel="noopener noreferrer">Download ↗</a></div></div>`).join('');
+    $('.deliverables').classList.add('acc-deliverables');
+    $('.deliverables').innerHTML=heading+contents;
+  }else{
+    $('.deliverables').classList.remove('acc-deliverables');
   const rows=data.deliverables.map(d=>`<div class="tr" role="row"><div><strong>${esc(d.name)}</strong><small>${esc(d.category)}</small></div><div>${esc(d.discipline)}</div><div>${date(d.issued)}</div><div>${pill(d.status,"neutral")}</div></div>`).join("");
   $(".deliverables").innerHTML='<div class="tr th" role="row"><div>Deliverable</div><div>Discipline</div><div>Issued</div><div>Status</div></div>'+rows;
+
+  }
 
   const downloadsWrap=$(".downloads-wrap");
   const downloads=data.downloads||[];

@@ -1,3 +1,4 @@
+import { createAccSource, handleAccDownload } from './acc.mjs';
 import { createServer } from "node:http";
 import { readFile, stat } from "node:fs/promises";
 import { createHmac, timingSafeEqual } from "node:crypto";
@@ -14,6 +15,7 @@ const SOURCES = {
   payments: "017eab8a-7b7d-476c-8d6a-6554cb35ab06"
 };
 
+const acc = createAccSource();
 let cache = null;
 let cacheTime = 0;
 const CACHE_MS = 30_000;
@@ -129,7 +131,7 @@ function visible(page) { return value(page.properties?.["Client Visible"]) !== f
 async function loadProject() {
   const [project, scopesRaw, assetsRaw, paymentsRaw, milestonesRaw] = await Promise.all([
     notion(`/pages/${PROJECT_ID}`), querySource(SOURCES.scopes),
-    querySource(SOURCES.deliverables), querySource(SOURCES.payments), queryMilestones()
+    (acc.enabled ? [] : querySource(SOURCES.deliverables)), querySource(SOURCES.payments), queryMilestones()
   ]);
   const p = project.properties || {};
   const scopes = scopesRaw.filter(visible).map(row => {
@@ -147,12 +149,17 @@ async function loadProject() {
   }).filter(scope => !/ffe/i.test(`${scope.scope} ${scope.company}`));
   const visibleAssets = assetsRaw.filter(visible);
   const visiblePayments = paymentsRaw.filter(visible);
-  const deliverables = visibleAssets.map(row => {
+  let deliverables = visibleAssets.map(row => {
     const x=row.properties || {};
     return { name:value(x.Asset)||"", category:value(x.Category)||"", discipline:value(x.Discipline)||"",
       issued:value(x["Issue Date"]), status:value(x.Status)||"", current:value(x.Current)!==false,
       order:Number(value(x["Sort Order"])||0), url:value(x["External URL"])||null };
   }).filter(x=>x.current).sort((a,b)=>a.order-b.order);
+  let deliverablesState = { source: 'notion', status: 'ready' };
+  if (acc.enabled) {
+    try { deliverables = await acc.list(); deliverablesState = { source: 'acc', status: 'ready' }; }
+    catch { deliverables = []; deliverablesState = { source: 'acc', status: 'unavailable' }; }
+  }
   const payments = visiblePayments.map(row => {
     const x=row.properties || {};
     return { id:row.id, name:value(x.Payment)||"", type:value(x.Type)||"", amount:number(x.Amount),
@@ -183,7 +190,7 @@ async function loadProject() {
       cintoo:value(p.Cintoo)||null, acc:value(p.ACC)||null, lead:(value(p["Project Lead"])||[])[0]||null,
       showFinancials:value(p["Show Financials"])!==false, showSchedule:value(p["Show Schedule"])===true,
       showFFE:value(p["Show FFE"])===true
-    }, scopes, milestones, deliverables, payments, downloads, syncedAt:new Date().toISOString()
+    }, scopes, milestones, deliverables, deliverablesState, payments, downloads, syncedAt:new Date().toISOString()
   };
 }
 
@@ -195,6 +202,7 @@ async function getProject(force=false) {
 function publicProject(data) {
   return {
     ...data, locked:true,
+    deliverables:data.deliverablesState?.source === "acc" ? [] : data.deliverables,
     scopes:data.scopes.map(scope=>({...scope,fee:null,paidToDate:null,balance:null})),
     payments:data.payments.map(payment=>({...payment,amount:null})),
     downloads:data.downloads.map(file=>({...file,url:null}))
@@ -221,6 +229,7 @@ async function serveStatic(req,res){
 
 createServer(async(req,res)=>{
   try{
+    if(await handleAccDownload(req,res,acc,authenticated))return;
     if(req.method==="POST"&&req.url==="/api/login"){
       const ip=req.headers["x-forwarded-for"]?.split(",")[0]?.trim()||req.socket.remoteAddress||"unknown",now=Date.now();
       const recent=(loginAttempts.get(ip)||[]).filter(time=>now-time<10*60*1000);

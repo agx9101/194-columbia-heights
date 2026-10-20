@@ -5,7 +5,10 @@
   "type": "module",
   "scripts": {
     "start": "node server.mjs",
-    "check": "node --check server.mjs && node --check dist/app.js"
+    "check": "node --check server.mjs && node --check acc.mjs && node --check dist/app.js",
+    "test": "node --test"
   },
-  "engines": { "node": ">=20" }
+  "engines": {
+    "node": ">=20"
+  }
 }
