@@ -118,7 +118,7 @@ export function makeServer(env=process.env, transport=fetch) {
     for await(const part of req){size+=part.length;if(size>8192)throw new Error('Request too large');parts.push(part);}
     return JSON.parse(Buffer.concat(parts).toString('utf8')||'{}');
   }
-  const staticFiles={'/':['index.html','text/html'],'/index.html':['index.html','text/html'],'/app.js':['app.js','text/javascript'],'/styles.css':['styles.css','text/css'],'/portal.css':['portal.css','text/css'],'/robots.txt':['robots.txt','text/plain']};
+  const staticFiles={'/assets/allen-ghaida.png':['assets/allen-ghaida.png','image/png'],'/':['index.html','text/html'],'/index.html':['index.html','text/html'],'/app.js':['app.js','text/javascript'],'/styles.css':['styles.css','text/css'],'/portal.css':['portal.css','text/css'],'/robots.txt':['robots.txt','text/plain']};
   const server=createServer(async(req,res)=>{
     try {
       const path=new URL(req.url,'http://localhost').pathname;

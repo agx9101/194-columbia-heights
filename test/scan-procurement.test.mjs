@@ -82,7 +82,7 @@ function renderInTest(data) {
 test('the client shows the Polycam label and Procured By column, then clears both on logout', () => {
   const x = buildProject(page(), { ffe: [item('Owner')] }, P);
   const { getNode, context } = renderInTest(x);
-  assert.match(getNode('access').innerHTML, /View 3D Scan · Polycam/);
+  assert.match(getNode('access').innerHTML, /<b>View 3D Scan<\/b><small>Polycam<\/small>/);
   assert.match(getNode('access').innerHTML, /https:\/\/poly\.cam\/capture\/EXAMPLE-SCAN/);
   assert.doesNotMatch(getNode('access').innerHTML, /Cintoo/);
   assert.match(getNode('ffe').innerHTML, /<th scope="col">Procured By<\/th>/);
