@@ -97,6 +97,26 @@ export function makeServer(env=process.env, transport=fetch) {
     }
     throw new Error('Data source exceeds configured page limit');
   }
+  async function children(id) {
+    const blocks=[];let cursor;
+    do {
+      const result=await notion(`/blocks/${id}/children?page_size=100${cursor?`&start_cursor=${encodeURIComponent(cursor)}`:''}`);
+      blocks.push(...(result.results||[]));cursor=result.has_more?result.next_cursor:null;
+    } while(cursor);
+    return blocks.filter(b=>!b.archived&&!b.in_trash);
+  }
+  async function projectImage() {
+    const blocks=await children(projectId);
+    const section=blocks.find(b=>b.type==='callout'&&(b.callout?.rich_text||[]).map(t=>t.plain_text||t.text?.content||'').join('').trim().toUpperCase()==='AXONOMETRIC / PROJECT IMAGE');
+    if(!section?.has_children)return null;
+    const images=await children(section.id);
+    for(const block of images) {
+      if(block.type!=='image')continue;
+      const url=safeURL(block.image?.[block.image.type]?.url);
+      if(url)return {name:'Project axonometric',url};
+    }
+    return null;
+  }
   async function project() {
     if(!dataReady) throw new Error('Project integration not configured');
     if(cache && Date.now()-cacheAt<TTL) return cache;
@@ -109,7 +129,7 @@ export function makeServer(env=process.env, transport=fetch) {
         const skip=(key==='ffe'&&val(page.properties?.['Show FFE'])!==true)||(key==='milestones'&&val(page.properties?.['Show Schedule'])!==true)||(key==='payments'&&val(page.properties?.['Show Financials'])!==true);
         records[key]=skip?[]:await query(id);
       }
-      const result=buildProject(page,records,projectId); cache=result; cacheAt=Date.now(); return result;
+      const result=buildProject(page,records,projectId); result.project.hero=await projectImage()||result.project.hero; cache=result; cacheAt=Date.now(); return result;
     })();
     try{return await pending;}finally{pending=null;}
   }
